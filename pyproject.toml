@@ -17,6 +17,9 @@ dependencies = [
     "python-frontmatter>=1.1.0",
     "rich>=14.1.0",
     "sqlalchemy>=2.0.0",
+    # Force CPU-only torch/torchvision (no CUDA bloat!)
+    "torch",
+    "torchvision",
 ]
 
 
