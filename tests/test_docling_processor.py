@@ -273,7 +273,7 @@ class TestDoclingIntegration:
         from hackathon.processing.docling_processor import process_document_with_docling
 
         _, frontmatter = extract_yaml_frontmatter(temp_markdown_file)
-        node_ids = process_document_with_docling(
+        _ = process_document_with_docling(
             db_session, sample_document.id, temp_markdown_file, frontmatter
         )
 
@@ -304,7 +304,7 @@ class TestDoclingIntegration:
 
         try:
             _, frontmatter = extract_yaml_frontmatter(tmp_path)
-            node_ids = process_document_with_docling(
+            _ = process_document_with_docling(
                 db_session, sample_document.id, tmp_path, frontmatter
             )
 
@@ -312,9 +312,9 @@ class TestDoclingIntegration:
 
             nodes = get_all_leaf_nodes(db_session, sample_document.id)
 
-            # Should have code nodes
-            code_nodes = [n for n in nodes if n.node_type == "code"]
-            # Note: Node type inference may vary based on chunking
-            assert len(nodes) > 0  # At least processed something
+            # Should have code nodes (note: type inference may vary based on chunking)
+            _code_nodes = [n for n in nodes if n.node_type == "code"]
+            # At least processed something
+            assert len(nodes) > 0
         finally:
             tmp_path.unlink(missing_ok=True)

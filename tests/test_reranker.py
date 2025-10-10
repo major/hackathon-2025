@@ -180,7 +180,9 @@ class TestWatsonxReranker:
     """Test WatsonxReranker class."""
 
     @patch("hackathon.retrieval.reranker.Rerank")
-    def test_reranker_initialization_with_env(self, mock_rerank_class, mock_logger, mock_env_vars):
+    def test_reranker_initialization_with_env(
+        self, mock_rerank_class, mock_logger, mock_env_vars
+    ):
         """Test reranker initialization with environment variables."""
         reranker = WatsonxReranker()
 
@@ -320,9 +322,7 @@ class TestWatsonxReranker:
         )
 
         mock_reranker = MagicMock()
-        mock_reranker.generate.return_value = {
-            "results": [{"index": 0, "score": 0.95}]
-        }
+        mock_reranker.generate.return_value = {"results": [{"index": 0, "score": 0.95}]}
         mock_rerank_class.return_value = mock_reranker
 
         reranker = WatsonxReranker()
@@ -342,9 +342,7 @@ class TestWatsonxReranker:
     ):
         """Test warning for short queries."""
         mock_reranker = MagicMock()
-        mock_reranker.generate.return_value = {
-            "results": [{"index": 0, "score": 0.95}]
-        }
+        mock_reranker.generate.return_value = {"results": [{"index": 0, "score": 0.95}]}
         mock_rerank_class.return_value = mock_reranker
 
         reranker = WatsonxReranker()
@@ -369,9 +367,7 @@ class TestWatsonxReranker:
         )
 
         mock_reranker = MagicMock()
-        mock_reranker.generate.return_value = {
-            "results": [{"index": 0, "score": 0.95}]
-        }
+        mock_reranker.generate.return_value = {"results": [{"index": 0, "score": 0.95}]}
         mock_rerank_class.return_value = mock_reranker
 
         reranker = WatsonxReranker()
@@ -398,10 +394,14 @@ class TestRerankResultsConvenience:
 
         assert len(results) == 1
         mock_reranker_class.assert_called_once()
-        mock_reranker.rerank.assert_called_once_with("test query", sample_search_results, 1)
+        mock_reranker.rerank.assert_called_once_with(
+            "test query", sample_search_results, 1
+        )
 
     @patch("hackathon.retrieval.reranker.WatsonxReranker")
-    def test_rerank_results_custom_model(self, mock_reranker_class, sample_search_results):
+    def test_rerank_results_custom_model(
+        self, mock_reranker_class, sample_search_results
+    ):
         """Test rerank_results with custom model."""
         mock_reranker = MagicMock()
         mock_reranker.rerank.return_value = sample_search_results

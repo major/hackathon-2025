@@ -99,7 +99,9 @@ class TestContextExpander:
         # For flat structure, should just return node text
         assert block_text == target_node.text_content
 
-    def test_get_semantic_block_text_empty_node(self, expander, db_session, sample_document):
+    def test_get_semantic_block_text_empty_node(
+        self, expander, db_session, sample_document
+    ):
         """Test semantic block with node that has no content."""
         from hackathon.models.database import DocumentNode
 
@@ -228,7 +230,9 @@ class TestContextExpander:
         if target_node.meta and target_node.meta.get("headings"):
             assert "Section" in formatted
 
-    def test_format_node_content_no_content(self, expander, db_session, sample_document):
+    def test_format_node_content_no_content(
+        self, expander, db_session, sample_document
+    ):
         """Test formatting node with no text content."""
         from hackathon.models.database import DocumentNode
 
@@ -283,7 +287,9 @@ class TestContextExpander:
         if node.meta and node.meta.get("headings"):
             assert "Section" in formatted
 
-    def test_format_neighbor_node_no_content(self, expander, db_session, sample_document):
+    def test_format_neighbor_node_no_content(
+        self, expander, db_session, sample_document
+    ):
         """Test neighbor formatting with no content."""
         from hackathon.models.database import DocumentNode
 
@@ -359,8 +365,12 @@ class TestContextExpander:
         target_node = sample_nodes[2]
 
         # Should work the same regardless of _include_siblings value
-        context1 = expander.get_parent_context(target_node, levels=1, _include_siblings=True)
-        context2 = expander.get_parent_context(target_node, levels=1, _include_siblings=False)
+        context1 = expander.get_parent_context(
+            target_node, levels=1, _include_siblings=True
+        )
+        context2 = expander.get_parent_context(
+            target_node, levels=1, _include_siblings=False
+        )
 
         # In flat structure, both should be the same
         assert context1 == context2

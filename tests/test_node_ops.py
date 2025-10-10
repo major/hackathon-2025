@@ -115,9 +115,7 @@ class TestGetAllLeafNodes:
 
         assert nodes == []
 
-    def test_get_all_leaf_nodes_non_leaf_nodes(
-        self, db_session, sample_document
-    ):
+    def test_get_all_leaf_nodes_non_leaf_nodes(self, db_session, sample_document):
         """Test that non-leaf nodes are excluded."""
         # Create non-leaf node
         non_leaf = DocumentNode(
@@ -363,9 +361,7 @@ class TestGetNeighbors:
             for i in range(len(after) - 1):
                 assert after[i].position < after[i + 1].position
 
-    def test_get_neighbors_different_documents(
-        self, db_session, sample_document
-    ):
+    def test_get_neighbors_different_documents(self, db_session, sample_document):
         """Test that neighbors are scoped to the same document."""
         # Create second document with nodes
         from hackathon.models.database import Document

@@ -2,7 +2,7 @@
 
 import pytest
 
-from hackathon.config import ConfigValidator, Settings, get_settings
+from hackathon.config import ConfigValidator, get_settings
 
 
 class TestSettings:
