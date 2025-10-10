@@ -10,8 +10,8 @@ env:
   PYTHON_VERSION: "3.12"
 
 jobs:
-  lint-and-format:
-    name: Lint & Format (Ruff)
+  lint:
+    name: Lint & Format
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -28,16 +28,13 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install dependencies
-        run: uv sync --all-extras --dev
+        run: make install
 
-      - name: Run ruff linter
-        run: uv run ruff check .
+      - name: Run lint (ruff)
+        run: make lint
 
-      - name: Run ruff formatter check
-        run: uv run ruff format --check .
-
-  type-check:
-    name: Type Check (Pyright)
+  types:
+    name: Type Check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -54,13 +51,13 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install dependencies
-        run: uv sync --all-extras --dev
+        run: make install
 
-      - name: Run pyright
-        run: uv run pyright
+      - name: Run type check (pyright)
+        run: make types
 
-  test:
-    name: Tests (pytest + coverage)
+  tests:
+    name: Tests
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -77,13 +74,13 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install dependencies
-        run: uv sync --all-extras --dev
+        run: make install
 
       - name: Download BERT tokenizer for offline mode
         run: uv run download-tokenizer
 
-      - name: Run tests with coverage
-        run: uv run pytest --cov=src --cov-report=xml --cov-report=term
+      - name: Run tests (pytest + coverage)
+        run: make tests
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v5
@@ -94,8 +91,8 @@ jobs:
           name: codecov-umbrella
           fail_ci_if_error: false
 
-  code-complexity:
-    name: Code Complexity (Radon)
+  complexity:
+    name: Code Complexity
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -112,16 +109,13 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install dependencies
-        run: uv sync --all-extras --dev
+        run: make install
 
-      - name: Check cyclomatic complexity
-        run: uv run radon cc src --min B --show-complexity
+      - name: Check complexity (radon)
+        run: make complexity
 
-      - name: Check maintainability index
-        run: uv run radon mi src --min B
-
-  dead-code:
-    name: Dead Code Detection (Vulture)
+  deadcode:
+    name: Dead Code Detection
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -138,24 +132,24 @@ jobs:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install dependencies
-        run: uv sync --all-extras --dev
+        run: make install
 
-      - name: Run vulture
-        run: uv run vulture src --min-confidence 80
+      - name: Scan for dead code (vulture)
+        run: make deadcode
         continue-on-error: true  # Don't fail the build on dead code warnings
 
   all-checks-passed:
     name: All Checks Passed
     runs-on: ubuntu-latest
-    needs: [lint-and-format, type-check, test, code-complexity, dead-code]
+    needs: [lint, types, tests, complexity, deadcode]
     if: always()
     steps:
       - name: Check if all jobs succeeded
         run: |
-          if [[ "${{ needs.lint-and-format.result }}" == "success" && \
-                "${{ needs.type-check.result }}" == "success" && \
-                "${{ needs.test.result }}" == "success" && \
-                "${{ needs.code-complexity.result }}" == "success" ]]; then
+          if [[ "${{ needs.lint.result }}" == "success" && \
+                "${{ needs.types.result }}" == "success" && \
+                "${{ needs.tests.result }}" == "success" && \
+                "${{ needs.complexity.result }}" == "success" ]]; then
             echo "✅ All required checks passed!"
             exit 0
           else
