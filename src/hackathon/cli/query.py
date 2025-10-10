@@ -193,26 +193,65 @@ def _create_argument_parser() -> argparse.ArgumentParser:
         metavar="N",
         help="Number of candidates to retrieve before reranking (default: 50, only used with --rerank)",
     )
+    parser.add_argument(
+        "--expand-query",
+        "-x",
+        action="store_true",
+        help="Expand query with semantic variations using IBM Watsonx (improves recall, requires WATSONX_API_KEY and WATSONX_PROJECT_ID)",
+    )
+    parser.add_argument(
+        "--query-variations",
+        "-v",
+        type=int,
+        default=3,
+        metavar="N",
+        help="Number of query variations to generate when using --expand-query (default: 3)",
+    )
     return parser
 
 
 def _execute_query_and_display(query: str, searcher, expander, db, args) -> list:
     """Execute a query and display results with optional expansions."""
     console.print(f"\n[green]Searching for:[/green] {query}")
+
+    # Show enabled features
+    features = []
+    if args.expand_query:
+        features.append(f"🔍 Query expansion ({args.query_variations} variations)")
     if args.rerank:
-        console.print(
-            f"[cyan]🎯 Reranking enabled (candidates={args.candidates})[/cyan]\n"
-        )
+        features.append(f"🎯 Reranking (candidates={args.candidates})")
+
+    if features:
+        console.print(f"[cyan]{' + '.join(features)}[/cyan]\n")
     else:
         console.print()
 
-    # Perform multi-field BM25 search (with optional reranking)
-    results = searcher.search(
-        query,
-        top_k=args.top_k,
-        use_reranker=args.rerank,
-        rerank_candidates=args.candidates,
-    )
+    # Perform multi-field BM25 search (with optional query expansion and reranking)
+    if args.expand_query:
+        results, expanded_queries = searcher.search(
+            query,
+            top_k=args.top_k,
+            use_reranker=args.rerank,
+            rerank_candidates=args.candidates,
+            use_query_expansion=True,
+            num_query_variations=args.query_variations,
+            return_expanded_queries=True,
+        )
+        # Show the expanded queries
+        console.print("[dim]Expanded queries:[/dim]")
+        for i, q in enumerate(expanded_queries):
+            if i == 0:
+                console.print(f"  [bold]{i + 1}. {q}[/bold] [dim](original)[/dim]")
+            else:
+                console.print(f"  {i + 1}. {q}")
+        console.print()
+    else:
+        results = searcher.search(
+            query,
+            top_k=args.top_k,
+            use_reranker=args.rerank,
+            rerank_candidates=args.candidates,
+        )
 
     # Display results
     display_results(results, expander, expand_context=True)
@@ -308,16 +347,45 @@ def _handle_new_query(results, searcher, expander, args):
     query = console.input("[bold cyan]Enter your query:[/bold cyan] ")
     if query.strip():
         console.print(f"\n[green]Searching for:[/green] {query}")
+
+        # Show enabled features
+        features = []
+        if args.expand_query:
+            features.append(f"🔍 Query expansion ({args.query_variations} variations)")
         if args.rerank:
-            console.print("[cyan]🎯 Reranking enabled[/cyan]\n")
+            features.append("🎯 Reranking")
+
+        if features:
+            console.print(f"[cyan]{' + '.join(features)}[/cyan]\n")
         else:
             console.print()
-        new_results = searcher.search(
-            query,
-            top_k=args.top_k,
-            use_reranker=args.rerank,
-            rerank_candidates=args.candidates,
-        )
+
+        if args.expand_query:
+            new_results, expanded_queries = searcher.search(
+                query,
+                top_k=args.top_k,
+                use_reranker=args.rerank,
+                rerank_candidates=args.candidates,
+                use_query_expansion=True,
+                num_query_variations=args.query_variations,
+                return_expanded_queries=True,
+            )
+            # Show the expanded queries
+            console.print("[dim]Expanded queries:[/dim]")
+            for i, q in enumerate(expanded_queries):
+                if i == 0:
+                    console.print(f"  [bold]{i + 1}. {q}[/bold] [dim](original)[/dim]")
+                else:
+                    console.print(f"  {i + 1}. {q}")
+            console.print()
+        else:
+            new_results = searcher.search(
+                query,
+                top_k=args.top_k,
+                use_reranker=args.rerank,
+                rerank_candidates=args.candidates,
+            )
+
         display_results(new_results, expander, expand_context=False)
         results[:] = new_results
 

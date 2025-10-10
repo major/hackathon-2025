@@ -71,12 +71,18 @@ class RetrievalPipeline:
             List of SearchResult objects with optional context expansion
         """
         # Perform search (with optional reranking)
-        results = self.searcher.search(
+        # Note: return_expanded_queries=False ensures we get list[SearchResult], not a tuple
+        search_results = self.searcher.search(
             query=query,
             top_k=top_k,
             use_reranker=self.use_reranker,
             rerank_candidates=rerank_candidates,
+            return_expanded_queries=False,
         )
+
+        # Type narrowing: when return_expanded_queries=False, we get list[SearchResult]
+        assert isinstance(search_results, list), "Expected list[SearchResult]"
+        results = search_results
 
         # Expand context if requested
         if expand_context and results:
