@@ -1,16 +1,16 @@
-.PHONY: help tests lint types complexity all clean install docs-serve docs-build
+.PHONY: help tests lint types complexity deadcode deadcode-aggressive all clean install
 
 help:
 	@echo "Available targets:"
-	@echo "  make tests      - Run pytest test suite"
-	@echo "  make lint       - Run ruff linter and formatter"
-	@echo "  make types      - Run pyright type checker"
-	@echo "  make complexity - Run radon code complexity analysis"
-	@echo "  make all        - Run all checks (tests, lint, types)"
-	@echo "  make clean      - Clean build artifacts and cache"
-	@echo "  make install    - Install dependencies with uv"
-	@echo "  make docs-serve - Start MkDocs dev server with live reload"
-	@echo "  make docs-build - Build MkDocs static site for production"
+	@echo "  make tests              - Run pytest test suite"
+	@echo "  make lint               - Run ruff linter and formatter"
+	@echo "  make types              - Run pyright type checker"
+	@echo "  make complexity         - Run radon code complexity analysis"
+	@echo "  make deadcode           - Find unused code with vulture (80% confidence)"
+	@echo "  make deadcode-aggressive - Find unused code (60% confidence, more false positives)"
+	@echo "  make all                - Run all checks (tests, lint, types)"
+	@echo "  make clean              - Clean build artifacts and cache"
+	@echo "  make install            - Install dependencies with uv"
 
 tests:
 	@echo "Running pytest..."
@@ -29,10 +29,28 @@ types:
 complexity:
 	@echo "Running radon cyclomatic complexity analysis..."
 	@echo "=== Cyclomatic Complexity (A-F scale) ==="
-	uv run radon cc src/ -a -s
+	@RADON_CFG="" uv run radon cc src/ -a -s
 	@echo ""
 	@echo "=== Maintainability Index (A-C scale) ==="
-	uv run radon mi src/ -s
+	@RADON_CFG="" uv run radon mi src/ -s
+
+deadcode:
+	@echo "Scanning for unused code with vulture..."
+	@echo "=== Dead Code Detection ==="
+	@echo ""
+	@uv run vulture src/ .vulture_whitelist.py --min-confidence 80 --sort-by-size || true
+	@echo ""
+	@echo "Note: Review results carefully - some code may be used dynamically or by external tools."
+	@echo "Tip: Add false positives to .vulture_whitelist.py"
+	@echo "     Adjust sensitivity with: make deadcode CONFIDENCE=60 (default: 80, range: 0-100)"
+
+deadcode-aggressive:
+	@echo "Scanning for unused code (aggressive mode)..."
+	@echo "=== Dead Code Detection (60% confidence) ==="
+	@echo ""
+	@uv run vulture src/ .vulture_whitelist.py --min-confidence 60 --sort-by-size || true
+	@echo ""
+	@echo "Note: Lower confidence = more false positives, but catches more potential dead code."
 
 all: lint types tests
 	@echo "All checks passed!"
@@ -49,11 +67,3 @@ clean:
 install:
 	@echo "Installing dependencies..."
 	uv sync --dev
-
-docs-serve:
-	@echo "Starting MkDocs development server..."
-	uv run mkdocs serve
-
-docs-build:
-	@echo "Building MkDocs documentation..."
-	uv run mkdocs build

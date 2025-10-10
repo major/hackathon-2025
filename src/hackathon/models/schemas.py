@@ -15,37 +15,22 @@ class DocumentNodeCreate(BaseModel):
     """Schema for creating a document node."""
 
     document_id: int
-    parent_id: int | None = None
     node_type: str
     text_content: str | None = None
     is_leaf: bool = False
     node_path: str
+    position: int | None = None
     metadata: dict[str, str | int | float | bool] | None = None
 
 
-class EmbeddingCreate(BaseModel):
-    """Schema for creating an embedding."""
+class MultiFieldBM25IndexCreate(BaseModel):
+    """Schema for creating a multi-field BM25 index entry."""
 
     node_id: int
-    vector: list[float]
-    model_name: str
-
-
-class BM25IndexCreate(BaseModel):
-    """Schema for creating BM25 index data."""
-
-    node_id: int
-    tokens: list[str]
-    token_count: int
-
-
-class ContextualChunkCreate(BaseModel):
-    """Schema for creating a contextual chunk."""
-
-    node_id: int
-    original_text: str
-    contextual_summary: str
-    contextualized_text: str
+    full_text: str
+    headings: str
+    summary: str
+    contextual_text: str = ""  # Optional contextual summary + text
 
 
 class SearchResult(BaseModel):
@@ -64,11 +49,11 @@ class SearchResult(BaseModel):
 
 
 class ExpandedContext(BaseModel):
-    """Schema for expanded context with parent nodes."""
+    """Schema for expanded context with neighbor nodes."""
 
     node_id: int
     text_content: str
     node_type: str
     node_path: str
-    parents: list["ExpandedContext"] = Field(default_factory=list)
-    children: list["ExpandedContext"] = Field(default_factory=list)
+    neighbors_before: list["ExpandedContext"] = Field(default_factory=list)
+    neighbors_after: list["ExpandedContext"] = Field(default_factory=list)

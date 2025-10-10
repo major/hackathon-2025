@@ -1,11 +1,10 @@
 """Tests for database operations."""
 
-from hackathon.database.operations import (
+from hackathon.database.document_ops import (
     create_document,
-    create_document_node,
     get_document_by_filename,
-    get_node_ancestors,
 )
+from hackathon.database.node_ops import create_document_node
 from hackathon.models.schemas import DocumentCreate, DocumentNodeCreate
 
 
@@ -35,61 +34,76 @@ def test_get_document_by_filename(db_session):
 
 
 def test_create_document_node(db_session):
-    """Test document node creation."""
+    """Test document node creation with flat structure."""
     # Create document first
     doc_data = DocumentCreate(filename="test.md", filepath="/path/to/test.md")
     doc = create_document(db_session, doc_data)
 
-    # Create node
+    # Create node (flat structure - no parent_id)
     node_data = DocumentNodeCreate(
         document_id=doc.id,
-        parent_id=None,
-        node_type="section",
-        text_content="Test section",
-        is_leaf=False,
-        node_path="0",
+        node_type="paragraph",
+        text_content="Test paragraph",
+        is_leaf=True,
+        node_path="chunk_0",
+        position=0,
     )
 
     node = create_document_node(db_session, node_data)
 
     assert node.id is not None
     assert node.document_id == doc.id
-    assert node.node_type == "section"
-    assert node.is_leaf is False
+    assert node.node_type == "paragraph"
+    assert node.is_leaf is True
+    assert node.position == 0
 
 
-def test_node_hierarchy(db_session):
-    """Test hierarchical node relationships."""
+def test_sequential_nodes(db_session):
+    """Test creating sequential nodes in flat structure."""
     # Create document
     doc_data = DocumentCreate(filename="test.md", filepath="/path/to/test.md")
     doc = create_document(db_session, doc_data)
 
-    # Create parent node
-    parent_data = DocumentNodeCreate(
-        document_id=doc.id,
-        parent_id=None,
-        node_type="section",
-        text_content="Parent section",
-        is_leaf=False,
-        node_path="0",
-    )
-    parent = create_document_node(db_session, parent_data)
+    # Create multiple sequential nodes
+    nodes = []
+    for i in range(3):
+        node_data = DocumentNodeCreate(
+            document_id=doc.id,
+            node_type="paragraph",
+            text_content=f"Paragraph {i}",
+            is_leaf=True,
+            node_path=f"chunk_{i}",
+            position=i,
+        )
+        node = create_document_node(db_session, node_data)
+        nodes.append(node)
 
-    # Create child node
-    child_data = DocumentNodeCreate(
+    # Verify sequential positions
+    assert nodes[0].position == 0
+    assert nodes[1].position == 1
+    assert nodes[2].position == 2
+
+    # Verify all belong to same document
+    for node in nodes:
+        assert node.document_id == doc.id
+
+
+def test_node_with_metadata(db_session):
+    """Test node creation with metadata."""
+    doc_data = DocumentCreate(filename="test.md", filepath="/path/to/test.md")
+    doc = create_document(db_session, doc_data)
+
+    node_data = DocumentNodeCreate(
         document_id=doc.id,
-        parent_id=parent.id,
-        node_type="paragraph",
-        text_content="Child paragraph",
+        node_type="code",
+        text_content="print('hello')",
         is_leaf=True,
-        node_path="0.0",
+        node_path="chunk_0",
+        position=0,
+        metadata={"language": "python", "headings": "Introduction > Setup"},
     )
-    child = create_document_node(db_session, child_data)
 
-    # Test relationship
-    assert child.parent_id == parent.id
+    node = create_document_node(db_session, node_data)
 
-    # Test ancestor retrieval
-    ancestors = get_node_ancestors(db_session, child.id)
-    assert len(ancestors) == 1
-    assert ancestors[0].id == parent.id
+    assert node.id is not None
+    assert node.meta == {"language": "python", "headings": "Introduction > Setup"}

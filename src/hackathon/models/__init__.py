@@ -2,34 +2,26 @@
 
 from hackathon.models.database import (
     Base,
-    BM25Index,
-    ContextualChunk,
     Document,
     DocumentNode,
-    Embedding,
+    MultiFieldBM25Index,
 )
 from hackathon.models.schemas import (
-    BM25IndexCreate,
-    ContextualChunkCreate,
     DocumentCreate,
     DocumentNodeCreate,
-    EmbeddingCreate,
     ExpandedContext,
+    MultiFieldBM25IndexCreate,
     SearchResult,
 )
 
 __all__ = [
-    "BM25Index",
-    "BM25IndexCreate",
     "Base",
-    "ContextualChunk",
-    "ContextualChunkCreate",
     "Document",
     "DocumentCreate",
     "DocumentNode",
     "DocumentNodeCreate",
-    "Embedding",
-    "EmbeddingCreate",
     "ExpandedContext",
+    "MultiFieldBM25Index",
+    "MultiFieldBM25IndexCreate",
     "SearchResult",
 ]

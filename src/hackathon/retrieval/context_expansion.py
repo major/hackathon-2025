@@ -1,20 +1,13 @@
-"""Context expansion by walking up the document tree."""
-
-import json
+"""Context expansion using neighbor-based retrieval (flat structure)."""
 
 from sqlalchemy.orm import Session
 
-from hackathon.database.operations import (
-    get_all_leaf_nodes,
-    get_node_ancestors,
-    get_node_children,
-)
+from hackathon.database.node_ops import get_all_leaf_nodes, get_neighbors
 from hackathon.models.database import DocumentNode
-from hackathon.models.schemas import ExpandedContext
 
 
 class ContextExpander:
-    """Expand context by traversing the document tree."""
+    """Expand context using position-based neighbor retrieval."""
 
     def __init__(self, db: Session) -> None:
         """
@@ -25,291 +18,209 @@ class ContextExpander:
         """
         self.db = db
 
-    def get_expanded_context(
-        self,
-        node: DocumentNode,
-        include_ancestors: bool = True,
-        include_children: bool = False,
-    ) -> ExpandedContext:
-        """
-        Get expanded context for a node.
-
-        Args:
-            node: Document node to expand context for
-            include_ancestors: Whether to include ancestor nodes
-            include_children: Whether to include child nodes
-
-        Returns:
-            ExpandedContext with ancestors and children
-        """
-        # Build base context
-        context = ExpandedContext(
-            node_id=node.id,
-            text_content=node.text_content or "",
-            node_type=node.node_type,
-            node_path=node.node_path,
-        )
-
-        # Add ancestors if requested
-        if include_ancestors:
-            ancestors = get_node_ancestors(self.db, node.id)
-            context.parents = [
-                ExpandedContext(
-                    node_id=ancestor.id,
-                    text_content=ancestor.text_content or "",
-                    node_type=ancestor.node_type,
-                    node_path=ancestor.node_path,
-                )
-                for ancestor in ancestors
-            ]
-
-        # Add children if requested
-        if include_children:
-            children = get_node_children(self.db, node.id)
-            context.children = [
-                ExpandedContext(
-                    node_id=child.id,
-                    text_content=child.text_content or "",
-                    node_type=child.node_type,
-                    node_path=child.node_path,
-                )
-                for child in children
-            ]
-
-        return context
-
-    def build_context_text(
-        self,
-        node: DocumentNode,
-        depth: int = 1,
-        include_siblings: bool = False,
-        exclude_current: bool = False,
+    def get_neighbor_context(
+        self, node: DocumentNode, before: int = 1, after: int = 1
     ) -> str:
         """
-        Build expanded context text by walking up the tree.
+        Get context by expanding to include N neighboring chunks before and after.
+
+        This provides a simple, predictable expansion strategy based on document order.
 
         Args:
-            node: Starting node
-            depth: How many levels up to traverse (0 = just node, 1 = parent, 2 = grandparent, etc.)
-            include_siblings: Whether to include sibling nodes
-            exclude_current: If True, don't include the current node (useful when showing semantic block separately)
+            node: The current node (search result)
+            before: Number of chunks to include before the current node
+            after: Number of chunks to include after the current node
 
         Returns:
-            Expanded context as formatted text
+            Formatted context text with neighbors clearly marked
+
+        Example:
+            get_neighbor_context(node, before=2, after=1) returns:
+            [BEFORE-2] ...
+            [BEFORE-1] ...
+            [CURRENT] ...
+            [AFTER-1] ...
         """
         parts = []
 
-        # Get ancestors up to specified depth
-        ancestors = get_node_ancestors(self.db, node.id)[:depth]
+        # Get neighbors from database
+        before_neighbors, after_neighbors = get_neighbors(self.db, node, before, after)
 
-        # Add ancestors from root down
-        for ancestor in reversed(ancestors):
-            if ancestor.text_content:
-                parts.append(f"[{ancestor.node_type}] {ancestor.text_content}")
+        # Add before neighbors (furthest to closest)
+        for i, neighbor in enumerate(before_neighbors, start=1):
+            distance = len(before_neighbors) - i + 1
+            parts.append(self._format_neighbor_node(neighbor, f"BEFORE-{distance}"))
 
-        # Add siblings if requested
-        if include_siblings and node.parent_id:
-            siblings = get_node_children(self.db, node.parent_id)
-            for sibling in siblings:
-                if sibling.id != node.id and sibling.text_content:
-                    parts.append(
-                        f"[sibling: {sibling.node_type}] {sibling.text_content}"
-                    )
+        # Add current node
+        parts.append(self._format_node_content(node, "current"))
 
-        # Add the node itself (unless excluded)
-        if not exclude_current and node.text_content:
-            parts.append(f"[current: {node.node_type}] {node.text_content}")
-
-        return "\n\n".join(parts)
-
-    def get_parent_section(self, node: DocumentNode) -> DocumentNode | None:
-        """
-        Get the parent section node.
-
-        Args:
-            node: Current node
-
-        Returns:
-            Parent section node if found, None otherwise
-        """
-        ancestors = get_node_ancestors(self.db, node.id)
-
-        for ancestor in ancestors:
-            if ancestor.node_type == "section":
-                return ancestor
-
-        return None
-
-    def get_full_section_text(self, node: DocumentNode) -> str:
-        """
-        Get full text of the section containing this node.
-
-        Args:
-            node: Node within a section
-
-        Returns:
-            Full section text including all child nodes
-        """
-        # Find parent section
-        section = self.get_parent_section(node)
-
-        if not section:
-            return node.text_content or ""
-
-        # Get all children of the section
-        children = get_node_children(self.db, section.id)
-
-        # Build full text
-        parts = []
-        if section.text_content:
-            parts.append(f"# {section.text_content}")
-
-        for child in children:
-            if child.text_content:
-                parts.append(child.text_content)
+        # Add after neighbors (closest to furthest)
+        for i, neighbor in enumerate(after_neighbors, start=1):
+            parts.append(self._format_neighbor_node(neighbor, f"AFTER-{i}"))
 
         return "\n\n".join(parts)
 
     def get_semantic_block_text(self, node: DocumentNode) -> str:
         """
-        Get the full semantic block (list, code block, table) if node is part of one.
+        Get the full semantic block text (for code blocks that might be split).
 
-        If the node is part of a semantic block that was split across multiple chunks,
-        this returns the complete block by reassembling all related chunks.
+        For the flat HybridChunker structure, this just returns the node text
+        since HybridChunker generally keeps semantic blocks intact.
 
         Args:
             node: Node that might be part of a semantic block
 
         Returns:
-            Complete semantic block text, or just the node text if not in a block
+            Node text (semantic blocks are already intact with HybridChunker)
         """
-        # Check if node has semantic block metadata (legacy from old chunker)
-        metadata = node.meta or {}
-        semantic_block_str = metadata.get("semantic_block")
+        # With HybridChunker's intelligent splitting, semantic blocks are usually intact
+        # If needed, we could use neighbors to reassemble based on heading context
+        return node.text_content or ""
 
-        if semantic_block_str:
-            # Legacy semantic block metadata exists, use old logic
-            return self._reassemble_legacy_semantic_block(node, semantic_block_str)
-
-        # New Docling-based logic: check if this is a code block that might be split
-        docling_types = metadata.get("docling_types", "")
-        node_type = node.node_type
-
-        # Only try to reassemble if this node contains code
-        if node_type != "code" and "code" not in docling_types:
-            return node.text_content or ""
-
-        # Try to find adjacent chunks that are part of the same code block
-        return self._reassemble_docling_code_block(node)
-
-    def _reassemble_legacy_semantic_block(
-        self, node: DocumentNode, semantic_block_str: str
-    ) -> str:
-        """Reassemble semantic blocks from legacy markdown_chunker metadata."""
-        # Parse the semantic block metadata
-        semantic_block = self._parse_semantic_block(semantic_block_str)
-        if not semantic_block or not node.parent_id:
-            return node.text_content or ""
-
-        # Find related chunks
-        block_chunks = self._find_related_legacy_chunks(node, semantic_block)
-        if not block_chunks:
-            return node.text_content or ""
-
-        # Reassemble based on block type
-        return self._join_chunks_by_type(block_chunks, semantic_block.get("type"))
-
-    def _parse_semantic_block(self, semantic_block_str: str) -> dict | None:
-        """Parse semantic block JSON string safely."""
-        try:
-            return (
-                json.loads(semantic_block_str)
-                if isinstance(semantic_block_str, str)
-                else semantic_block_str
-            )
-        except (json.JSONDecodeError, TypeError):
-            return None
-
-    def _find_related_legacy_chunks(
-        self, node: DocumentNode, semantic_block: dict
-    ) -> list[DocumentNode]:
-        """Find sibling chunks that are part of the same semantic block."""
-        siblings = get_node_children(self.db, node.parent_id)
-        block_chunks = []
-
-        for sibling in siblings:
-            sibling_block = self._parse_semantic_block(
-                (sibling.meta or {}).get("semantic_block")
-            )
-            if self._is_same_semantic_block(sibling_block, semantic_block):
-                block_chunks.append(sibling)
-
-        block_chunks.sort(key=lambda n: n.node_path)
-        return block_chunks
-
-    def _is_same_semantic_block(
-        self, sibling_block: dict | None, semantic_block: dict
-    ) -> bool:
-        """Check if two semantic blocks are the same."""
-        if not sibling_block:
-            return False
-        return (
-            sibling_block.get("type") == semantic_block.get("type")
-            and sibling_block.get("start_line") == semantic_block.get("start_line")
-            and sibling_block.get("end_line") == semantic_block.get("end_line")
-        )
-
-    def _join_chunks_by_type(
-        self, chunks: list[DocumentNode], block_type: str | None
-    ) -> str:
-        """Join chunks based on block type."""
-        texts = [chunk.text_content or "" for chunk in chunks]
-
-        if block_type in ["code_block", "ordered_list", "unordered_list", "table"]:
-            return "\n".join(texts)
-        return "\n\n".join(texts)
-
-    def _reassemble_docling_code_block(self, node: DocumentNode) -> str:
+    def get_full_document_context(self, node: DocumentNode) -> str:
         """
-        Reassemble code blocks that Docling split across multiple chunks.
+        Get the entire document context (all chunks in order).
 
         Args:
-            node: The current code node
+            node: Any node in the document
 
         Returns:
-            Reassembled code block text or original node text
+            Complete document text with all nodes
         """
-        related_chunks = self._find_related_code_chunks(node)
-
-        if len(related_chunks) <= 1:
-            return node.text_content or ""
-
-        related_chunks.sort(key=lambda n: n.node_path)
-        return "\n".join(chunk.text_content or "" for chunk in related_chunks)
-
-    def _find_related_code_chunks(self, node: DocumentNode) -> list[DocumentNode]:
-        """Find code chunks that are part of the same code block."""
-        metadata = node.meta or {}
-        heading = metadata.get("headings", "")
+        # Get all leaf nodes for this document, ordered by position
         all_nodes = get_all_leaf_nodes(self.db, node.document_id)
+        all_nodes.sort(key=lambda n: n.position if n.position is not None else 0)
 
-        related_chunks = []
-        for other_node in all_nodes:
-            if self._is_related_code_chunk(other_node, heading, node.parent_id):
-                related_chunks.append(other_node)
+        parts = []
+        for doc_node in all_nodes:
+            if doc_node.text_content:
+                parts.append(self._format_node_content(doc_node, "document"))
 
-        return related_chunks
+        return "\n\n".join(parts)
 
-    def _is_related_code_chunk(
-        self, other_node: DocumentNode, heading: str, parent_id: int | None
-    ) -> bool:
-        """Check if a node is part of the same code block."""
-        other_meta = other_node.meta or {}
-        other_heading = other_meta.get("headings", "")
-        other_docling_types = other_meta.get("docling_types", "")
+    def get_parent_context(
+        self, node: DocumentNode, levels: int = 1, _include_siblings: bool = False
+    ) -> str:
+        """
+        Get context by expanding to N surrounding chunks (flat structure).
 
-        return (
-            other_heading == heading
-            and other_node.parent_id == parent_id
-            and (other_node.node_type == "code" or "code" in other_docling_types)
-        )
+        Since we have a flat structure, "levels" means surrounding chunks.
+
+        Args:
+            node: The starting node
+            levels: Number of surrounding chunks (0 = just node, N = N before + N after, -1 = full doc)
+            _include_siblings: Ignored (no hierarchy, kept for API compatibility)
+
+        Returns:
+            Formatted context text
+        """
+        if levels == 0:
+            return self._format_node_content(node, "current")
+
+        if levels == -1:
+            return self.get_full_document_context(node)
+
+        # Use neighbor context for surrounding chunks
+        return self.get_neighbor_context(node, before=levels, after=levels)
+
+    def estimate_context_sizes(
+        self, node: DocumentNode, max_levels: int = 5
+    ) -> dict[str, int]:
+        """
+        Estimate character counts for different expansion levels.
+
+        Args:
+            node: The node to estimate expansions for
+            max_levels: Maximum number of surrounding chunks to estimate
+
+        Returns:
+            Dictionary mapping expansion level to character count
+        """
+        sizes = {}
+
+        # Node only
+        sizes["node"] = len(node.text_content or "")
+
+        # Surrounding chunks at different levels
+        for level in range(1, max_levels + 1):
+            context_text = self.get_parent_context(node, levels=level)
+            sizes[f"level_{level}"] = len(context_text)
+
+        # Full document
+        full_doc = self.get_full_document_context(node)
+        sizes["full_document"] = len(full_doc)
+
+        return sizes
+
+    def _format_node_content(self, node: DocumentNode, context_type: str) -> str:
+        """Format a node's content with metadata header."""
+        metadata = node.meta or {}
+        header_parts = []
+
+        # Map context types to display labels
+        context_labels = {
+            "current": "CURRENT",
+            "before": "BEFORE",
+            "after": "AFTER",
+            "document": "DOCUMENT",
+        }
+        label = context_labels.get(context_type, context_type.upper())
+
+        # Add node type and context indicator
+        header_parts.append(f"[{label}: {node.node_type}]")
+
+        # Add heading context if available
+        if headings := metadata.get("headings"):
+            header_parts.append(f"Section: {headings}")
+
+        header = " - ".join(header_parts)
+
+        if node.text_content:
+            return f"{header}\n{node.text_content}"
+        else:
+            return f"{header}\n[No content]"
+
+    def _format_semantic_block(self, node: DocumentNode, block_text: str) -> str:
+        """Format a semantic block with metadata header."""
+        metadata = node.meta or {}
+        header_parts = []
+
+        header_parts.append(f"[CURRENT: {node.node_type} - COMPLETE BLOCK]")
+
+        if headings := metadata.get("headings"):
+            header_parts.append(f"Section: {headings}")
+
+        header = " - ".join(header_parts)
+        return f"{header}\n{block_text}"
+
+    def _format_neighbor_node(self, node: DocumentNode, label: str) -> str:
+        """
+        Format a neighbor node with a clear label.
+
+        Args:
+            node: The neighbor node
+            label: Label like "BEFORE-2" or "AFTER-1"
+
+        Returns:
+            Formatted node text
+        """
+        metadata = node.meta or {}
+        header_parts = []
+
+        # Add position label and node type
+        header_parts.append(f"[{label}: {node.node_type}]")
+
+        # Add heading context if available
+        if headings := metadata.get("headings"):
+            header_parts.append(f"Section: {headings}")
+
+        # Add position info
+        if node.position is not None:
+            header_parts.append(f"Position: {node.position}")
+
+        header = " - ".join(header_parts)
+
+        if node.text_content:
+            return f"{header}\n{node.text_content}"
+        else:
+            return f"{header}\n[No content]"

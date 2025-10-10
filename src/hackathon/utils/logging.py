@@ -17,7 +17,7 @@ def setup_logging(level: int = LOG_LEVEL) -> logging.Logger:
     Configure centralized logging with rich formatting.
 
     Args:
-        level: Logging level (default: INFO)
+        level: Logging level (default: WARNING)
 
     Returns:
         Configured logger instance
@@ -25,7 +25,7 @@ def setup_logging(level: int = LOG_LEVEL) -> logging.Logger:
     Example:
         >>> from hackathon.utils.logging import setup_logging
         >>> logger = setup_logging()
-        >>> logger.info("Processing document")
+        >>> logger.warning("Processing document")
     """
     # Create rich handler
     handler = RichHandler(

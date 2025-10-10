@@ -214,3 +214,8 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# BM25S index
+.bm25s_index/
+
+.claude

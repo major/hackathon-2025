@@ -1,195 +1,181 @@
-"""Contextual Retrieval implementation using Anthropic's approach."""
+"""Contextual summary generation using IBM Watsonx AI.
 
-import json
+Implements Anthropic's Contextual Retrieval pattern using Watsonx LLMs
+to generate situational context for each chunk.
+"""
 
-from openai import OpenAI
-from sqlalchemy.orm import Session
+from typing import Any
+
+from ibm_watsonx_ai import Credentials
+from ibm_watsonx_ai.foundation_models import ModelInference
 
 from hackathon.config import get_settings
-from hackathon.database.operations import create_contextual_chunk, get_node_ancestors
-from hackathon.models.database import DocumentNode
-from hackathon.models.schemas import ContextualChunkCreate
 from hackathon.utils.logging import get_logger
 
+# 🔇 Logging configured centrally in hackathon/__init__.py
 logger = get_logger(__name__)
 
 
-class ContextualRetriever:
-    """Generate contextual summaries for document chunks."""
+def get_watsonx_credentials() -> Credentials:
+    """Get IBM Watsonx credentials from settings."""
+    settings = get_settings()
+    if not settings.watsonx_api_key:
+        msg = "WATSONX_API_KEY not set in environment. Get your key at: https://cloud.ibm.com/iam/apikeys"
+        raise ValueError(msg)
+    if not settings.watsonx_project_id:
+        msg = "WATSONX_PROJECT_ID not set in environment"
+        raise ValueError(msg)
 
-    def __init__(self) -> None:
-        """Initialize the contextual retriever with OpenAI-compatible client."""
-        self.settings = get_settings()
+    return Credentials(
+        url=settings.watsonx_url,
+        api_key=settings.watsonx_api_key,
+    )
 
-        # Initialize OpenAI client pointing to local granite4 server
-        self.client = OpenAI(
-            base_url=self.settings.llm_api_base, api_key=self.settings.llm_api_key
-        )
 
-    def build_context_from_ancestors(self, db: Session, node: DocumentNode) -> str:
-        """
-        Build context by walking up the document tree to ancestors.
+def generate_contextual_summary(
+    chunk_text: str,
+    document_context: dict[str, Any],
+    max_retries: int = 3,
+) -> str:
+    """
+    Generate a contextual summary for a chunk using IBM Watsonx AI.
 
-        Args:
-            db: Database session
-            node: Current document node
+    Following Anthropic's Contextual Retrieval pattern, this generates a brief
+    contextual description that situates the chunk within the broader document.
 
-        Returns:
-            Context string from ancestors
-        """
-        ancestors = get_node_ancestors(db, node.id)
+    Args:
+        chunk_text: The text content of the chunk
+        document_context: Document metadata (filename, headings, etc.)
+        max_retries: Maximum number of retries on API errors
 
-        # Build context from ancestors (root to immediate parent)
-        context_parts = []
-        for ancestor in reversed(ancestors):  # Reverse to go from root to parent
-            if ancestor.text_content:
-                context_parts.append(f"{ancestor.node_type}: {ancestor.text_content}")
+    Returns:
+        Contextual summary (1-2 sentences)
 
-        return " > ".join(context_parts) if context_parts else "Document"
+    Example:
+        >>> context = {"filename": "setup.md", "headings": "Installation > Dependencies"}
+        >>> generate_contextual_summary("Run npm install...", context)
+        "This section explains how to install project dependencies using npm."
+    """
+    settings = get_settings()
+    credentials = get_watsonx_credentials()
+    filename = document_context.get("filename", "unknown")
+    headings = document_context.get("headings", "")
 
-    def generate_contextual_summary(
-        self, db: Session, node: DocumentNode, document_context: str = ""
-    ) -> str:
-        """
-        Generate a contextual summary for a chunk using the LLM.
+    prompt = _build_contextual_prompt(filename, headings, chunk_text)
+    model = _create_watsonx_model(settings, credentials)
 
-        Args:
-            db: Database session
-            node: Document node to generate context for
-            document_context: Additional document-level context
-
-        Returns:
-            Contextual summary string
-        """
-        # Get hierarchical context
-        hierarchical_context = self.build_context_from_ancestors(db, node)
-
-        # Construct prompt for contextual summary with JSON mode
-        prompt = f"""<document>
-{document_context}
-</document>
-
-Document hierarchy: {hierarchical_context}
-
-Here is the chunk we want to situate within the whole document:
-<chunk>
-{node.text_content}
-</chunk>
-
-Please give a short succinct context to situate this chunk within the overall document for the purposes of improving search retrieval of the chunk.
-
-IMPORTANT: You must respond with ONLY valid JSON. Do not include any prefixes like "Context:", "Summary:", or any other text outside the JSON structure.
-
-Respond with JSON in this exact format:
-{{"context": "your succinct context here"}}
-
-The value in the "context" field should be the contextual summary itself, without any prefixes or labels."""
-
+    for attempt in range(max_retries):
         try:
-            response = self.client.chat.completions.create(
-                model=self.settings.llm_model,
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.3,
-                max_tokens=200,
-                response_format={"type": "json_object"},
-            )
+            response = model.generate_text(prompt=prompt)
+            summary = _clean_llm_response(response)
 
-            content = (
-                response.choices[0].message.content.strip() if response.choices else ""
-            )
-
-            if not content:
-                logger.warning(
-                    "Empty response from LLM, using hierarchical context as fallback"
-                )
-                return hierarchical_context
-
-            # Parse JSON response
-            try:
-                result = json.loads(content)
-            except json.JSONDecodeError:
-                logger.exception(f"Failed to parse JSON response: {content[:200]}...")
-                return hierarchical_context
-            else:
-                summary = result.get("context", "")
-
-                if not summary:
-                    logger.warning(
-                        "Empty context in JSON response, using hierarchical context as fallback"
-                    )
-                    return hierarchical_context
-
-                # Post-process: strip common prefixes that LLM might add
-                prefixes_to_strip = ["Context:", "Summary:", "Context :", "Summary :"]
-                for prefix in prefixes_to_strip:
-                    summary = summary.removeprefix(prefix).strip()
-
+            if _is_valid_summary(summary):
                 return summary
-        except Exception:
-            # Fallback to hierarchical context if LLM fails
-            logger.exception(
-                "LLM request failed. Using hierarchical context as fallback."
+
+            logger.warning(
+                f"Empty or too short contextual summary (attempt {attempt + 1}/{max_retries})"
             )
-            return hierarchical_context
 
-    def create_contextual_chunk_for_node(
-        self, db: Session, node: DocumentNode, document_context: str = ""
-    ) -> None:
-        """
-        Create and store contextual chunk for a node.
+        except Exception as e:
+            logger.warning(
+                f"Watsonx API error (attempt {attempt + 1}/{max_retries}): {e}"
+            )
+            if attempt == max_retries - 1:
+                logger.error(
+                    f"Failed to generate contextual summary after {max_retries} attempts"
+                )
+                return _fallback_summary(filename)
 
-        Args:
-            db: Database session
-            node: Document node
-            document_context: Optional document-level context
-        """
-        if not node.text_content:
-            return
+    return _fallback_summary(filename)
 
-        # Generate contextual summary
-        summary = self.generate_contextual_summary(db, node, document_context)
 
-        # Create contextualized text (summary + original)
-        contextualized_text = f"{summary}\n\n{node.text_content}"
+def _build_contextual_prompt(filename: str, headings: str, chunk_text: str) -> str:
+    """Build the prompt for contextual summary generation."""
+    return f"""Here is a chunk from a document titled "{filename}".
 
-        # Store contextual chunk
-        chunk_data = ContextualChunkCreate(
-            node_id=node.id,
-            original_text=node.text_content,
-            contextual_summary=summary,
-            contextualized_text=contextualized_text,
-        )
+Document context:
+- Heading hierarchy: {headings if headings else "N/A"}
 
-        create_contextual_chunk(db, chunk_data)
+Chunk content:
+{chunk_text}
 
-    def batch_create_contextual_chunks(
-        self,
-        db: Session,
-        nodes: list[DocumentNode],
-        document_context: str = "",
-        progress_callback=None,
-    ) -> None:
-        """
-        Create contextual chunks for multiple nodes.
+Please provide a brief, 1-2 sentence contextual summary that explains what this chunk is about and how it relates to the broader document. Focus on the topic and purpose, not the specific details.
 
-        Args:
-            db: Database session
-            nodes: List of document nodes
-            document_context: Optional document-level context
-            progress_callback: Optional callback for progress updates
-        """
-        total = len(nodes)
+Your response should be ONLY the contextual summary, with no preamble or labels like "Context:" or "Summary:".
+"""
 
-        for idx, node in enumerate(nodes):
-            self.create_contextual_chunk_for_node(db, node, document_context)
 
-            # Commit periodically
-            if (idx + 1) % 10 == 0:
-                db.commit()
+def _create_watsonx_model(settings, credentials):
+    """Create a Watsonx model instance for text generation."""
+    return ModelInference(
+        model_id=settings.watsonx_llm_model,
+        credentials=credentials,
+        project_id=settings.watsonx_project_id,
+        params={
+            "decoding_method": "greedy",
+            "max_new_tokens": 100,
+            "temperature": 0.1,  # Low temperature for consistent summaries
+        },
+    )
 
-            # Update progress
-            if progress_callback:
-                progress_callback(idx + 1, total)
 
-        # Final commit
-        db.commit()
+def _clean_llm_response(response: str) -> str:
+    """Clean up common artifacts from LLM responses."""
+    summary = response.strip()
+
+    # Remove common prefixes
+    prefixes = [
+        "Context:",
+        "Summary:",
+        "Contextual summary:",
+        "This chunk",
+        "Here is",
+        "The contextual summary is:",
+    ]
+    for prefix in prefixes:
+        if summary.startswith(prefix):
+            summary = summary[len(prefix) :].strip()
+
+    # Remove quotes
+    if summary.startswith('"') and summary.endswith('"'):
+        summary = summary[1:-1]
+    if summary.startswith("'") and summary.endswith("'"):
+        summary = summary[1:-1]
+
+    return summary
+
+
+def _is_valid_summary(summary: str) -> bool:
+    """Check if the summary is valid (not empty, reasonable length)."""
+    return bool(summary and len(summary) >= 10)
+
+
+def _fallback_summary(filename: str) -> str:
+    """Generate a fallback summary when LLM fails."""
+    return f"Content from {filename}"
+
+
+def generate_contextual_text(
+    chunk_text: str,
+    contextual_summary: str,
+) -> str:
+    """
+    Combine contextual summary with chunk text for indexing.
+
+    This creates the enriched text that will be indexed in BM25,
+    following the Anthropic cookbook pattern.
+
+    Args:
+        chunk_text: Original chunk text
+        contextual_summary: LLM-generated contextual summary
+
+    Returns:
+        Combined text for indexing (summary + original text)
+
+    Example:
+        >>> summary = "This section explains database configuration."
+        >>> text = "Set DB_HOST=localhost in .env file"
+        >>> generate_contextual_text(text, summary)
+        "This section explains database configuration. Set DB_HOST=localhost in .env file"
+    """
+    return f"{contextual_summary} {chunk_text}"

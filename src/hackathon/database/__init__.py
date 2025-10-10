@@ -1,33 +1,24 @@
 """Database connection and operations."""
 
 from hackathon.database.connection import get_db, init_db, reset_db, session_scope
-from hackathon.database.operations import (
-    create_bm25_index,
-    create_contextual_chunk,
+from hackathon.database.document_ops import (
     create_document,
-    create_document_node,
-    create_embedding,
     get_all_documents,
-    get_all_leaf_nodes,
     get_document_by_filename,
-    get_node_ancestors,
-    get_node_children,
-    get_node_with_ancestors,
+    get_document_by_id,
 )
+from hackathon.database.node_ops import create_document_node, get_all_leaf_nodes
+from hackathon.database.search_ops import create_multifield_bm25_index
 
 __all__ = [
-    "create_bm25_index",
-    "create_contextual_chunk",
     "create_document",
     "create_document_node",
-    "create_embedding",
+    "create_multifield_bm25_index",
     "get_all_documents",
     "get_all_leaf_nodes",
     "get_db",
     "get_document_by_filename",
-    "get_node_ancestors",
-    "get_node_children",
-    "get_node_with_ancestors",
+    "get_document_by_id",
     "init_db",
     "reset_db",
     "session_scope",
