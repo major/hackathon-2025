@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "RAG system with BM25-only contextual retrieval (no vectors!)"
 readme = "README.md"
 authors = [{ name = "Major Hayden", email = "major@mhtx.net" }]
-requires-python = ">=3.12,<3.13"
+requires-python = ">=3.14,<3.15"
 dependencies = [
     "anytree>=2.13.0",
     "bm25s>=0.2.14",
